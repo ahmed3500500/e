@@ -196,6 +196,7 @@ public class CallMonitorService extends Service {
     }
     
     private void handleCallState(int state, String incomingNumber) {
+        if (incomingNumber == null) incomingNumber = "Unknown";
         if (lastIncomingNumber.equals(incomingNumber) && state == TelephonyManager.CALL_STATE_RINGING) {
             return; // Duplicate
         }
