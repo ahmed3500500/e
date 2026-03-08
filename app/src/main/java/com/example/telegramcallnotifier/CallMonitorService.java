@@ -78,13 +78,18 @@ public class CallMonitorService extends Service {
 
         try {
             if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
             } else {
                 startForeground(NOTIFICATION_ID, notification);
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Log.e("CallMonitorService", "Error starting foreground service", e);
-            // Fallback or stop
+            // Fallback: try standard start if specific type fails
+            try {
+                startForeground(NOTIFICATION_ID, notification);
+            } catch (Throwable t) {
+                Log.e("CallMonitorService", "Fatal error starting foreground", t);
+            }
         }
 
         // Register Phone Listener

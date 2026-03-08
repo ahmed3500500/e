@@ -83,24 +83,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void checkPermissionsAndStartService() {
-        String[] permissions = {
-                Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.READ_CALL_LOG,
-                Manifest.permission.FOREGROUND_SERVICE
-        };
+        // Simplified list construction
+        List<String> permsList = new ArrayList<>();
+        permsList.add(Manifest.permission.READ_PHONE_STATE);
+        permsList.add(Manifest.permission.READ_CALL_LOG);
+        permsList.add(Manifest.permission.FOREGROUND_SERVICE);
+        
+        if (Build.VERSION.SDK_INT >= 26) {
+            permsList.add(Manifest.permission.READ_PHONE_NUMBERS);
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
              // Android 13+ Notification Permission
-            permissions = new String[]{
-                    Manifest.permission.READ_PHONE_STATE,
-                    Manifest.permission.READ_CALL_LOG,
-                    Manifest.permission.FOREGROUND_SERVICE,
-                    Manifest.permission.POST_NOTIFICATIONS
-            };
+             permsList.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        
+        if (Build.VERSION.SDK_INT >= 34) {
+             // Android 14+ Foreground Service Permission
+             permsList.add(Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC);
         }
 
         List<String> listPermissionsNeeded = new ArrayList<>();
-        for (String p : permissions) {
+        for (String p : permsList) {
             if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
                 listPermissionsNeeded.add(p);
             }
@@ -123,7 +127,7 @@ public class MainActivity extends AppCompatActivity {
                     startService(serviceIntent);
                 }
                 textStatus.setText(getString(R.string.status_label) + " " + getString(R.string.service_running));
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 e.printStackTrace();
                 Toast.makeText(this, "Error starting service: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 textStatus.setText("Error: " + e.getMessage());
