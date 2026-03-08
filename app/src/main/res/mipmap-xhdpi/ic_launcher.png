@@ -1,0 +1,2 @@
+
+New-Item -Path app\src\main\res\mipmap-xxhdpi\ic_launcher.png -ItemType File -Value 

@@ -35,13 +35,13 @@ public class TelegramSender {
     }
 
     public String getBotToken() {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        return prefs.getString(KEY_BOT_TOKEN, "");
+        // Hardcoded Bot Token as requested
+        return "7718029584:AAFZ4Y42z2m39qYnN_48wN8iN8w0r7fK4jM"; 
     }
 
     public String getChatId() {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        return prefs.getString(KEY_CHAT_ID, "");
+        // Hardcoded Chat ID as requested
+        return "-1002345678901"; 
     }
 
     public void sendMessage(String message) {
