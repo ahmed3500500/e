@@ -262,13 +262,21 @@ public class CallMonitorService extends Service {
     }
 
     private String getNetworkType() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
-        if (activeNetwork != null) {
-            if (activeNetwork.getType() == ConnectivityManager.TYPE_WIFI) return "WiFi";
-            if (activeNetwork.getType() == ConnectivityManager.TYPE_MOBILE) return "Mobile Data";
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return "Unknown";
+            
+            NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+            if (activeNetwork != null && activeNetwork.isConnected()) {
+                if (activeNetwork.getType() == ConnectivityManager.TYPE_WIFI) return "WiFi";
+                if (activeNetwork.getType() == ConnectivityManager.TYPE_MOBILE) return "Mobile Data";
+                return "Connected";
+            }
+            return "No Internet";
+        } catch (Exception e) {
+            Log.e("CallMonitorService", "Error checking network", e);
+            return "Unknown (Error)";
         }
-        return "No Connection";
     }
 
     private String formatDuration(long seconds) {
