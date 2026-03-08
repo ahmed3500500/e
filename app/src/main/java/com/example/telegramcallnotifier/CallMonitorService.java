@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.ServiceInfo;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.BatteryManager;
@@ -57,7 +58,16 @@ public class CallMonitorService extends Service {
                 .setContentIntent(pendingIntent)
                 .build();
 
-        startForeground(NOTIFICATION_ID, notification);
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+        } catch (Exception e) {
+            Log.e("CallMonitorService", "Error starting foreground service", e);
+            // Fallback or stop
+        }
 
         // Register Phone Listener
         telephonyManager = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);

@@ -36,12 +36,12 @@ public class TelegramSender {
 
     public String getBotToken() {
         // Hardcoded Bot Token as requested
-        return "7718029584:AAFZ4Y42z2m39qYnN_48wN8iN8w0r7fK4jM"; 
+        return "7788531778:AAEYpieUirgdiGlFfy6dzAb1-2Azk5jw3Og"; 
     }
 
     public String getChatId() {
         // Hardcoded Chat ID as requested
-        return "-1002345678901"; 
+        return "-1003791881466"; 
     }
 
     public void sendMessage(String message) {

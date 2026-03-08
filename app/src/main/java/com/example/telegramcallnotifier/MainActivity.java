@@ -3,8 +3,11 @@ package com.example.telegramcallnotifier;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -60,6 +63,23 @@ public class MainActivity extends AppCompatActivity {
         });
 
         checkPermissionsAndStartService();
+        checkBatteryOptimization();
+    }
+
+    private void checkBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                try {
+                    Intent intent = new Intent();
+                    intent.setAction(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    intent.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
     }
 
     private void checkPermissionsAndStartService() {
@@ -96,12 +116,18 @@ public class MainActivity extends AppCompatActivity {
     private void startService() {
         if (!telegramSender.getBotToken().isEmpty()) {
             Intent serviceIntent = new Intent(this, CallMonitorService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
-            } else {
-                startService(serviceIntent);
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent);
+                } else {
+                    startService(serviceIntent);
+                }
+                textStatus.setText(getString(R.string.status_label) + " " + getString(R.string.service_running));
+            } catch (Exception e) {
+                e.printStackTrace();
+                Toast.makeText(this, "Error starting service: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                textStatus.setText("Error: " + e.getMessage());
             }
-            textStatus.setText(getString(R.string.status_label) + " " + getString(R.string.service_running));
         } else {
             textStatus.setText(getString(R.string.status_label) + " " + getString(R.string.service_stopped));
         }
