@@ -45,6 +45,11 @@ public class TelegramSender {
     }
 
     public void sendMessage(String message) {
+        if (message == null || message.isEmpty()) return;
+
+        // Log to file first
+        CustomExceptionHandler.log(context, "Telegram Sending: " + message);
+
         String token = getBotToken();
         String chatId = getChatId();
 
@@ -77,6 +82,7 @@ public class TelegramSender {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Error sending message", e);
+                CustomExceptionHandler.logError(context, e);
             }
         });
     }

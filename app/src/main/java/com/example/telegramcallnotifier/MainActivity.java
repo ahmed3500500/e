@@ -19,6 +19,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -29,10 +30,16 @@ public class MainActivity extends AppCompatActivity {
     private EditText editBotToken;
     private EditText editChatId;
     private TextView textStatus;
+    private CustomExceptionHandler exceptionHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Setup Crash Handler
+        exceptionHandler = new CustomExceptionHandler(this);
+        Thread.setDefaultUncaughtExceptionHandler(exceptionHandler);
+
         setContentView(R.layout.activity_main);
 
         telegramSender = new TelegramSender(this);
@@ -64,6 +71,12 @@ public class MainActivity extends AppCompatActivity {
 
         checkPermissionsAndStartService();
         checkBatteryOptimization();
+
+        // Log start
+        CustomExceptionHandler.log(this, "App Started. SDK: " + Build.VERSION.SDK_INT);
+
+        File logFile = CustomExceptionHandler.getLogFile(this);
+        textStatus.append("\n\nLogs at: " + logFile.getAbsolutePath());
     }
 
     private void checkBatteryOptimization() {

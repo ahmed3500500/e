@@ -52,6 +52,9 @@ public class CallMonitorService extends Service {
         super.onCreate();
         createNotificationChannel();
         telegramSender = new TelegramSender(this);
+        
+        // Log Service Start
+        CustomExceptionHandler.log(this, "Service onCreate. SDK: " + Build.VERSION.SDK_INT);
 
         // Acquire WakeLock
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
@@ -192,44 +195,39 @@ public class CallMonitorService extends Service {
         }
     }
     
-    // Override to handle number fetching if null
-    private void handleCallState(int state, String phoneNumber) {
-        if (phoneNumber == null && state == TelephonyManager.CALL_STATE_RINGING) {
-             // Try to get number from BroadcastReceiver or other means?
-             // Actually, sticking to legacy PhoneStateListener is better if it doesn't crash.
-             // The crash was likely due to ForegroundService start or Permission.
-             // Let's revert the "TelephonyCallback" idea if it complicates getting the number.
-             // But I already wrote the code structure.
-             // Let's implement a BroadcastReceiver for PHONE_STATE to get the number if needed.
-             // Or better: Use the legacy listener inside a try-catch block as primary.
+    private void handleCallState(int state, String incomingNumber) {
+        if (lastIncomingNumber.equals(incomingNumber) && state == TelephonyManager.CALL_STATE_RINGING) {
+            return; // Duplicate
         }
         
+        CustomExceptionHandler.log(this, "Call State: " + state + ", Number: " + (incomingNumber != null ? incomingNumber : "NULL"));
+
         switch (state) {
             case TelephonyManager.CALL_STATE_RINGING:
                 isRinging = true;
-                if (phoneNumber != null && !phoneNumber.isEmpty()) {
-                    lastIncomingNumber = phoneNumber;
-                }
-                String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
-                String msg = "📞 Incoming Call\nNumber: " + (lastIncomingNumber.isEmpty() ? "Unknown" : lastIncomingNumber) + "\nTime: " + time + "\n🔋 Battery: " + getBatteryLevel() + "%";
+                callStartTime = System.currentTimeMillis();
+                lastIncomingNumber = incomingNumber;
+                
+                String msg = "📞 Incoming Call Detected!\n" +
+                        "🔢 Number: " + (incomingNumber != null ? incomingNumber : "Unknown") + "\n" +
+                        "⏰ Time: " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+                
                 telegramSender.sendMessage(msg);
                 break;
-
             case TelephonyManager.CALL_STATE_OFFHOOK:
                 if (isRinging) {
-                    // Call answered
-                    callStartTime = System.currentTimeMillis();
-                    isRinging = false; // Reset ringing state
+                    telegramSender.sendMessage("✅ Call Answered");
+                } else {
+                    // Outgoing call
+                    telegramSender.sendMessage("Outgoing Call Started");
                 }
+                isRinging = false;
                 break;
-
             case TelephonyManager.CALL_STATE_IDLE:
-                if (callStartTime > 0) {
-                    long duration = (System.currentTimeMillis() - callStartTime) / 1000;
-                    String durationStr = formatDuration(duration);
-                    String endMsg = "Call Ended\nNumber: " + (lastIncomingNumber.isEmpty() ? "Unknown" : lastIncomingNumber) + "\n⏱ Duration: " + durationStr;
-                    telegramSender.sendMessage(endMsg);
-                    callStartTime = 0;
+                if (isRinging) {
+                     telegramSender.sendMessage("❌ Call Missed/Rejected");
+                } else {
+                     telegramSender.sendMessage("Call Ended");
                 }
                 isRinging = false;
                 break;
