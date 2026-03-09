@@ -168,7 +168,17 @@ public class CallMonitorService extends Service {
             PhoneStateListener listener = new PhoneStateListener() {
                 @Override
                 public void onCallStateChanged(int state, String phoneNumber) {
-                    handleCallState(state, phoneNumber, simSlot);
+                    // Strict Verification: Ensure this specific SIM is actually the one ringing
+                    if (state == TelephonyManager.CALL_STATE_RINGING) {
+                        if (subTm.getCallState() == TelephonyManager.CALL_STATE_RINGING) {
+                            handleCallState(state, phoneNumber, simSlot);
+                        } else {
+                             // Log ignored event
+                             Log.d("CallMonitorService", "Ignored RINGING event on SIM " + simSlot + " (Actual state: " + subTm.getCallState() + ")");
+                        }
+                    } else {
+                        handleCallState(state, phoneNumber, simSlot);
+                    }
                 }
             };
             subTm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE);
@@ -237,8 +247,8 @@ public class CallMonitorService extends Service {
                 }
             };
             
-            // Wait 500ms to gather data (SIM + Number)
-            debounceHandler.postDelayed(sendNotificationRunnable, 500);
+            // Wait 1000ms to gather data (SIM + Number)
+            debounceHandler.postDelayed(sendNotificationRunnable, 1000);
             
         } else if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
             // Cancel pending ringing notification if answered very quickly
