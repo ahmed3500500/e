@@ -38,6 +38,8 @@ public class CallMonitorService extends Service {
     private static final int NOTIFICATION_ID = 1;
     private TelephonyManager telephonyManager;
     private PhoneStateListener phoneStateListener;
+    // Keep strong references to listeners to prevent GC
+    private java.util.List<PhoneStateListener> activeListeners = new java.util.ArrayList<>();
     private Object telephonyCallback; // For API 31+
     private TelegramSender telegramSender;
     // Removed heartbeat fields
@@ -124,6 +126,8 @@ public class CallMonitorService extends Service {
         if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             java.util.List<android.telephony.SubscriptionInfo> subList = subscriptionManager.getActiveSubscriptionInfoList();
             if (subList != null && !subList.isEmpty()) {
+                // Clear existing listeners to avoid duplicates
+                activeListeners.clear();
                 for (android.telephony.SubscriptionInfo subInfo : subList) {
                     int subId = subInfo.getSubscriptionId();
                     int slotIndex = subInfo.getSimSlotIndex(); // 0 or 1
@@ -161,6 +165,7 @@ public class CallMonitorService extends Service {
                 }
             };
             subTm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE);
+            activeListeners.add(listener); // Keep strong reference
         } catch (Exception e) {
             Log.e("CallMonitorService", "Error registering listener for SIM " + simSlot, e);
         }
@@ -497,6 +502,12 @@ public class CallMonitorService extends Service {
         super.onDestroy();
         // Removed callReceiver unregister
         if (telephonyManager != null) {
+            // Unregister all multi-sim listeners
+            for (PhoneStateListener listener : activeListeners) {
+                telephonyManager.listen(listener, PhoneStateListener.LISTEN_NONE);
+            }
+            activeListeners.clear();
+
             if (Build.VERSION.SDK_INT >= 31 && telephonyCallback != null) {
                 telephonyManager.unregisterTelephonyCallback((TelephonyCallback) telephonyCallback);
             } else if (phoneStateListener != null) {
