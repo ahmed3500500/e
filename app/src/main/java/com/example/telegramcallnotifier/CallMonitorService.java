@@ -495,9 +495,7 @@ public class CallMonitorService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (callReceiver != null) {
-            unregisterReceiver(callReceiver);
-        }
+        // Removed callReceiver unregister
         if (telephonyManager != null) {
             if (Build.VERSION.SDK_INT >= 31 && telephonyCallback != null) {
                 telephonyManager.unregisterTelephonyCallback((TelephonyCallback) telephonyCallback);
