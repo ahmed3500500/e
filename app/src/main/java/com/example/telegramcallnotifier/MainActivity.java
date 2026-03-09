@@ -96,23 +96,25 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void checkPermissionsAndStartService() {
-        // Simplified list construction
         List<String> permsList = new ArrayList<>();
         permsList.add(Manifest.permission.READ_PHONE_STATE);
         permsList.add(Manifest.permission.READ_CALL_LOG);
-        permsList.add(Manifest.permission.FOREGROUND_SERVICE);
+        permsList.add(Manifest.permission.ANSWER_PHONE_CALLS);
+        permsList.add(Manifest.permission.CALL_PHONE);
         
         if (Build.VERSION.SDK_INT >= 26) {
             permsList.add(Manifest.permission.READ_PHONE_NUMBERS);
         }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            permsList.add(Manifest.permission.FOREGROUND_SERVICE);
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-             // Android 13+ Notification Permission
              permsList.add(Manifest.permission.POST_NOTIFICATIONS);
         }
         
         if (Build.VERSION.SDK_INT >= 34) {
-             // Android 14+ Foreground Service Permission
              permsList.add(Manifest.permission.FOREGROUND_SERVICE_DATA_SYNC);
         }
 

