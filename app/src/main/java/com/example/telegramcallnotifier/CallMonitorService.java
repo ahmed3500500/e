@@ -275,6 +275,8 @@ public class CallMonitorService extends Service {
         // Filter out Unknown numbers if user requested
         if (number.equals("Unknown")) {
              CustomExceptionHandler.log(this, "Skipping notification for Unknown number");
+             // Mark as ringing so we can handle Auto-Hangup in OFFHOOK state
+             isRinging = true; 
              attemptAutoAnswer();
              return; 
         }
