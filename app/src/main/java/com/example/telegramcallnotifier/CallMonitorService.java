@@ -228,15 +228,36 @@ public class CallMonitorService extends Service {
         if (state == TelephonyManager.CALL_STATE_RINGING) {
             
             // 1. Update pending data if available
-            if (incomingNumber != null && !incomingNumber.isEmpty() && !incomingNumber.equals("Unknown")) {
-                pendingNumber = incomingNumber;
-            }
+            // Priority Logic: Prefer the event that contains a valid incoming number.
+            // This helps filter out "Ghost" events where one SIM mirrors the other but without the number.
+            boolean isNewInfoBetter = false;
             
-            // Priority Logic: Always take the larger slot index to handle "Ghost SIM 1" events
-            // If SIM 2 is ringing, and SIM 1 (default) also ghosts ringing, we want to keep SIM 2.
-            if (simSlot != -1) {
-                if (simSlot > pendingSimSlot) {
+            boolean newHasNumber = (incomingNumber != null && !incomingNumber.isEmpty() && !incomingNumber.equals("Unknown"));
+            boolean currentHasNumber = (pendingNumber != null && !pendingNumber.equals("Unknown"));
+
+            if (pendingSimSlot == -1) {
+                isNewInfoBetter = true;
+            } else {
+                if (newHasNumber && !currentHasNumber) {
+                    isNewInfoBetter = true;
+                } else if (newHasNumber == currentHasNumber) {
+                    // Both have numbers or both don't.
+                    // If we already have a slot, and this is a DIFFERENT slot, 
+                    // we have a conflict (Race Condition).
+                    // Previous logic "simSlot > pendingSimSlot" caused "Always SIM 2".
+                    // Let's trust the LAST event, but only if it passes Strict Verification (already done in listener).
+                    isNewInfoBetter = true; 
+                }
+            }
+
+            CustomExceptionHandler.log(this, "Slot Decision: Current=" + pendingSimSlot + " New=" + simSlot + " Better=" + isNewInfoBetter + " NewHasNum=" + newHasNumber);
+
+            if (isNewInfoBetter) {
+                if (simSlot != -1) {
                     pendingSimSlot = simSlot;
+                }
+                if (newHasNumber) {
+                    pendingNumber = incomingNumber;
                 }
             }
 
