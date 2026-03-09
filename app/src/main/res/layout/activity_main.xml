@@ -38,10 +38,24 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="@string/chat_id_hint"
-        android:layout_marginBottom="24dp">
+        android:layout_marginBottom="12dp">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/editChatId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="numberSigned"/>
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Status Chat ID (Optional)"
+        android:layout_marginBottom="24dp">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/editStatusChatId"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:inputType="numberSigned"/>

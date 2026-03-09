@@ -549,7 +549,7 @@ public class CallMonitorService extends Service {
         }
         msg.append("⏰ Time: ").append(time);
         
-        telegramSender.sendMessage(msg.toString());
+        telegramSender.sendStatusMessage(msg.toString());
     }
 
     private void sendPeriodicStatusReport() {
@@ -562,7 +562,7 @@ public class CallMonitorService extends Service {
         msg.append(getScreenStatusString()).append("\n");
         msg.append("⏰ Time: ").append(time);
         
-        telegramSender.sendMessage(msg.toString());
+        telegramSender.sendStatusMessage(msg.toString());
     }
 
     private String getBatteryInfoString() {

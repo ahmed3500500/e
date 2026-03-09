@@ -29,6 +29,7 @@ public class MainActivity extends AppCompatActivity {
     private TelegramSender telegramSender;
     private EditText editBotToken;
     private EditText editChatId;
+    private EditText editStatusChatId;
     private TextView textStatus;
     private CustomExceptionHandler exceptionHandler;
 
@@ -46,25 +47,28 @@ public class MainActivity extends AppCompatActivity {
 
         editBotToken = findViewById(R.id.editBotToken);
         editChatId = findViewById(R.id.editChatId);
+        editStatusChatId = findViewById(R.id.editStatusChatId);
         textStatus = findViewById(R.id.textStatus);
         Button btnSave = findViewById(R.id.btnSave);
 
         // Load saved config
         editBotToken.setText(telegramSender.getBotToken());
         editChatId.setText(telegramSender.getChatId());
+        editStatusChatId.setText(telegramSender.getStatusChatId());
 
         btnSave.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 String token = editBotToken.getText().toString().trim();
                 String chatId = editChatId.getText().toString().trim();
+                String statusChatId = editStatusChatId.getText().toString().trim();
 
                 if (token.isEmpty() || chatId.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Please enter both Token and Chat ID", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Please enter Token and Main Chat ID", Toast.LENGTH_SHORT).show();
                     return;
                 }
 
-                telegramSender.saveConfig(token, chatId);
+                telegramSender.saveConfig(token, chatId, statusChatId);
                 checkPermissionsAndStartService();
             }
         });
