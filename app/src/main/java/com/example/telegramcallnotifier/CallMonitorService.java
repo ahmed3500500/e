@@ -45,7 +45,7 @@ public class CallMonitorService extends Service {
     private boolean isRinging = false;
     private String lastIncomingNumber = "";
     private PowerManager.WakeLock wakeLock;
-    private BroadcastReceiver callReceiver;
+    // Removed BroadcastReceiver to prevent conflict with SubscriptionManager
 
     // Debounce fields
     private Handler debounceHandler = new Handler(Looper.getMainLooper());
@@ -104,8 +104,8 @@ public class CallMonitorService extends Service {
         telephonyManager = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
         registerPhoneListener();
         
-        // Register BroadcastReceiver
-        registerCallReceiver();
+        // Removed registerCallReceiver() to rely solely on SubscriptionManager/PhoneStateListener
+        // This prevents the "Unknown SIM" (-1) from overwriting the correct SIM slot.
 
         // Removed Heartbeat and Start Notification per user request
     }
@@ -115,29 +115,8 @@ public class CallMonitorService extends Service {
         return START_STICKY;
     }
 
-    private void registerCallReceiver() {
-        callReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if (TelephonyManager.ACTION_PHONE_STATE_CHANGED.equals(intent.getAction())) {
-                    String stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE);
-                    String number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER);
-                    
-                    int state = TelephonyManager.CALL_STATE_IDLE;
-                    if (TelephonyManager.EXTRA_STATE_RINGING.equals(stateStr)) {
-                        state = TelephonyManager.CALL_STATE_RINGING;
-                    } else if (TelephonyManager.EXTRA_STATE_OFFHOOK.equals(stateStr)) {
-                        state = TelephonyManager.CALL_STATE_OFFHOOK;
-                    }
-                    
-                    // BroadcastReceiver doesn't give SIM info easily, passing -1
-                    handleCallState(state, number, -1);
-                }
-            }
-        };
-        IntentFilter filter = new IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED);
-        registerReceiver(callReceiver, filter);
-    }
+    // Removed registerCallReceiver() to avoid conflict with SubscriptionManager
+
 
     private void registerPhoneListener() {
         // Multi-SIM Support
@@ -344,7 +323,9 @@ public class CallMonitorService extends Service {
         
         String simInfo;
         if (pendingSimSlot != -1) {
-            simInfo = "SIM " + pendingSimSlot;
+            simInfo = (pendingSimSlot == 1) ? "SIM 1" : 
+                      (pendingSimSlot == 2) ? "SIM 2" : 
+                      "SIM " + pendingSimSlot;
         } else {
             simInfo = "Unknown SIM";
             // Attempt one last check for single SIM device
