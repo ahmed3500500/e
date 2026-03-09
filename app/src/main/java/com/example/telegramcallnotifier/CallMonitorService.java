@@ -242,11 +242,12 @@ public class CallMonitorService extends Service {
                     isNewInfoBetter = true;
                 } else if (newHasNumber == currentHasNumber) {
                     // Both have numbers or both don't.
-                    // If we already have a slot, and this is a DIFFERENT slot, 
-                    // we have a conflict (Race Condition).
-                    // Previous logic "simSlot > pendingSimSlot" caused "Always SIM 2".
-                    // Let's trust the LAST event, but only if it passes Strict Verification (already done in listener).
-                    isNewInfoBetter = true; 
+                    // Priority Logic: FIRST WRITE WINS.
+                    // We assume the first event we receive (with a number) is the Real event,
+                    // and subsequent events for other SIMs are likely "Ghost" mirrors.
+                    // So we do NOT update if we already have a valid slot.
+                    isNewInfoBetter = false;
+                    CustomExceptionHandler.log(this, "Ignored potential Ghost event from SIM " + simSlot + " because we already have SIM " + pendingSimSlot);
                 }
             }
 
@@ -387,8 +388,9 @@ public class CallMonitorService extends Service {
             if (subTm.getCallState() == TelephonyManager.CALL_STATE_RINGING) {
                 int slot = sub.getSimSlotIndex() + 1;
                 CustomExceptionHandler.log(this, "Found Ringing SIM via polling: Slot " + slot);
-                // Priority Logic: Higher slot wins (SIM 2 > SIM 1)
-                if (slot > bestSlot) {
+                // Priority Logic: Pick the first one found if we don't have one yet.
+                // If multiple are ringing, this might be ambiguous, but usually Slot 1 is checked first.
+                if (bestSlot == -1) {
                     bestSlot = slot;
                 }
             }
