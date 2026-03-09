@@ -285,24 +285,31 @@ public class CallMonitorService extends Service {
             return; // Already handled
         }
 
-        // Try to recover SIM info if missing and only 1 SIM exists
+        // Try to recover SIM info if missing
         if (pendingSimSlot == -1) {
-            if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                 android.telephony.SubscriptionManager subscriptionManager = getSystemService(android.telephony.SubscriptionManager.class);
-                 if (subscriptionManager != null) {
-                     java.util.List<android.telephony.SubscriptionInfo> subs = subscriptionManager.getActiveSubscriptionInfoList();
-                     if (subs != null && subs.size() == 1) {
-                         pendingSimSlot = subs.get(0).getSimSlotIndex() + 1;
-                     }
-                 }
-            }
+            pendingSimSlot = resolveSimSlot();
         }
 
         isRinging = true;
         callStartTime = System.currentTimeMillis();
         lastIncomingNumber = number;
         
-        String simInfo = (pendingSimSlot != -1) ? "SIM " + pendingSimSlot : "Unknown SIM";
+        String simInfo;
+        if (pendingSimSlot != -1) {
+            simInfo = "SIM " + pendingSimSlot;
+        } else {
+            simInfo = "Unknown SIM";
+            // Attempt one last check for single SIM device
+             if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                 android.telephony.SubscriptionManager subscriptionManager = getSystemService(android.telephony.SubscriptionManager.class);
+                 if (subscriptionManager != null) {
+                     java.util.List<android.telephony.SubscriptionInfo> subs = subscriptionManager.getActiveSubscriptionInfoList();
+                     if (subs != null && subs.size() == 1) {
+                         simInfo = "SIM " + (subs.get(0).getSimSlotIndex() + 1);
+                     }
+                 }
+             }
+        }
         
         String msg = "📞 Incoming Call Detected!\n" +
                 "🔢 Number: " + number + "\n" +
@@ -315,6 +322,34 @@ public class CallMonitorService extends Service {
         attemptAutoAnswer();
     }
     
+    private int resolveSimSlot() {
+        if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return -1;
+        }
+
+        android.telephony.SubscriptionManager subscriptionManager = getSystemService(android.telephony.SubscriptionManager.class);
+        if (subscriptionManager == null) return -1;
+
+        java.util.List<android.telephony.SubscriptionInfo> subs = subscriptionManager.getActiveSubscriptionInfoList();
+        if (subs == null || subs.isEmpty()) return -1;
+
+        // Strategy 1: Check which specific Subscription ID is Ringing
+        for (android.telephony.SubscriptionInfo sub : subs) {
+            TelephonyManager subTm = telephonyManager.createForSubscriptionId(sub.getSubscriptionId());
+            if (subTm.getCallState() == TelephonyManager.CALL_STATE_RINGING) {
+                CustomExceptionHandler.log(this, "Found Ringing SIM via polling: Slot " + (sub.getSimSlotIndex() + 1));
+                return sub.getSimSlotIndex() + 1;
+            }
+        }
+        
+        // Strategy 2: If only 1 SIM is active, assume it's that one
+        if (subs.size() == 1) {
+             return subs.get(0).getSimSlotIndex() + 1;
+        }
+
+        return -1;
+    }
+
     private void attemptAutoAnswer() {
         if (Build.VERSION.SDK_INT >= 26) {
              android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
