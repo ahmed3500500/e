@@ -10,14 +10,17 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.hardware.display.DisplayManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.net.wifi.WifiManager;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.view.Display;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyCallback;
 import android.telephony.TelephonyManager;
@@ -54,6 +57,14 @@ public class CallMonitorService extends Service {
     private Runnable sendNotificationRunnable;
     private String pendingNumber = null;
     private int pendingSimSlot = -1;
+
+    // Battery & Status Monitoring
+    private BatteryReceiver batteryReceiver;
+    private int lastBatteryLevel = -1;
+    private boolean lastChargingState = false;
+    private Handler periodicHandler = new Handler(Looper.getMainLooper());
+    private static final long PERIODIC_INTERVAL = 30 * 60 * 1000; // 30 Minutes
+    private Runnable periodicRunnable;
 
     @Override
     public void onCreate() {
@@ -110,6 +121,10 @@ public class CallMonitorService extends Service {
         // This prevents the "Unknown SIM" (-1) from overwriting the correct SIM slot.
 
         // Removed Heartbeat and Start Notification per user request
+
+        // Initialize Battery & Status Monitoring
+        startBatteryMonitoring();
+        startPeriodicReporting();
     }
 
     @Override
@@ -443,17 +458,165 @@ public class CallMonitorService extends Service {
         }
     }
 
-    private String getBatteryLevel() {
+    private void startBatteryMonitoring() {
+        batteryReceiver = new BatteryReceiver();
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_BATTERY_CHANGED);
+        filter.addAction(Intent.ACTION_POWER_CONNECTED);
+        filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
+        registerReceiver(batteryReceiver, filter);
+    }
+
+    private void stopBatteryMonitoring() {
+        if (batteryReceiver != null) {
+            unregisterReceiver(batteryReceiver);
+            batteryReceiver = null;
+        }
+    }
+
+    private void startPeriodicReporting() {
+        periodicRunnable = new Runnable() {
+            @Override
+            public void run() {
+                sendPeriodicStatusReport();
+                periodicHandler.postDelayed(this, PERIODIC_INTERVAL);
+            }
+        };
+        periodicHandler.postDelayed(periodicRunnable, PERIODIC_INTERVAL);
+    }
+
+    private void stopPeriodicReporting() {
+        if (periodicRunnable != null) {
+            periodicHandler.removeCallbacks(periodicRunnable);
+        }
+    }
+
+    private class BatteryReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (Intent.ACTION_BATTERY_CHANGED.equals(action)) {
+                handleBatteryChanged(intent);
+            } else if (Intent.ACTION_POWER_CONNECTED.equals(action)) {
+                sendBatteryAlert("🔋 Battery Status", "⚡ Charging: Yes\n🔌 Charger Connected");
+            } else if (Intent.ACTION_POWER_DISCONNECTED.equals(action)) {
+                sendBatteryAlert("🔋 Battery Status", "⚡ Charging: No\n🔌 Charger Disconnected");
+            }
+        }
+    }
+
+    private void handleBatteryChanged(Intent intent) {
+        int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+        int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+        int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+        boolean isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                             status == BatteryManager.BATTERY_STATUS_FULL;
+        
+        if (level != -1 && scale != -1) {
+            int pct = (int) ((level / (float) scale) * 100);
+            
+            // Check Thresholds (20, 15, 10, 5)
+            // We only alert if we drop TO or BELOW a threshold, and we weren't already there/below in the last check (or if it's a fresh start)
+            // To avoid spam, we track lastBatteryLevel.
+            
+            if (lastBatteryLevel != -1) {
+                checkThreshold(lastBatteryLevel, pct, 20);
+                checkThreshold(lastBatteryLevel, pct, 15);
+                checkThreshold(lastBatteryLevel, pct, 10);
+                checkThreshold(lastBatteryLevel, pct, 5);
+            }
+            
+            lastBatteryLevel = pct;
+            lastChargingState = isCharging;
+        }
+    }
+
+    private void checkThreshold(int oldLevel, int newLevel, int threshold) {
+        if (oldLevel > threshold && newLevel <= threshold) {
+            sendBatteryAlert("⚠️ Battery Low!", "📉 Level: " + newLevel + "%");
+        }
+    }
+
+    private void sendBatteryAlert(String title, String extraInfo) {
+        String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+        String batteryStatus = getBatteryInfoString();
+        
+        StringBuilder msg = new StringBuilder();
+        msg.append(title).append("\n");
+        msg.append(batteryStatus).append("\n");
+        if (extraInfo != null && !extraInfo.isEmpty()) {
+            msg.append(extraInfo).append("\n");
+        }
+        msg.append("⏰ Time: ").append(time);
+        
+        telegramSender.sendMessage(msg.toString());
+    }
+
+    private void sendPeriodicStatusReport() {
+        String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+        
+        StringBuilder msg = new StringBuilder();
+        msg.append("📊 Periodic Status Report\n");
+        msg.append(getBatteryInfoString()).append("\n");
+        msg.append(getNetworkStatusString()).append("\n");
+        msg.append(getScreenStatusString()).append("\n");
+        msg.append("⏰ Time: ").append(time);
+        
+        telegramSender.sendMessage(msg.toString());
+    }
+
+    private String getBatteryInfoString() {
         IntentFilter ifilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
         Intent batteryStatus = registerReceiver(null, ifilter);
-        if (batteryStatus != null) {
-            int level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-            int scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
-            float batteryPct = level * 100 / (float) scale;
-            return String.valueOf((int) batteryPct);
-        }
-        return "Unknown";
+        
+        if (batteryStatus == null) return "🔋 Battery: Unknown";
+        
+        int level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+        int scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+        int pct = (int) ((level / (float) scale) * 100);
+        
+        int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+        boolean isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                             status == BatteryManager.BATTERY_STATUS_FULL;
+        
+        int chargePlug = batteryStatus.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
+        String type = "Unknown";
+        if (chargePlug == BatteryManager.BATTERY_PLUGGED_USB) type = "USB";
+        else if (chargePlug == BatteryManager.BATTERY_PLUGGED_AC) type = "AC";
+        else if (chargePlug == BatteryManager.BATTERY_PLUGGED_WIRELESS) type = "Wireless";
+        
+        return "🔢 Battery: " + pct + "%\n" +
+               "⚡ Charging: " + (isCharging ? "Yes" : "No") + 
+               (isCharging ? ("\n🔌 Type: " + type) : "");
     }
+
+    private String getNetworkStatusString() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return "📶 Network: Unknown";
+        
+        NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+        boolean isConnected = activeNetwork != null && activeNetwork.isConnectedOrConnecting();
+        String netType = isConnected ? activeNetwork.getTypeName() : "None";
+        
+        WifiManager wifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+        boolean isWifiEnabled = (wifiManager != null && wifiManager.isWifiEnabled());
+        
+        return "📶 Network: " + (isConnected ? "Connected (" + netType + ")" : "Disconnected") + "\n" +
+               "🌐 Wi-Fi: " + (isWifiEnabled ? "On" : "Off");
+    }
+
+    private String getScreenStatusString() {
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        boolean isScreenOn = false;
+        if (Build.VERSION.SDK_INT >= 20) {
+            isScreenOn = pm.isInteractive();
+        } else {
+            isScreenOn = pm.isScreenOn();
+        }
+        
+        return "📱 Screen: " + (isScreenOn ? "On" : "Off");
+    }
+
 
     private String getNetworkType() {
         try {
@@ -500,6 +663,10 @@ public class CallMonitorService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        
+        stopBatteryMonitoring();
+        stopPeriodicReporting();
+
         // Removed callReceiver unregister
         if (telephonyManager != null) {
             // Unregister all multi-sim listeners
