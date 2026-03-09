@@ -231,12 +231,24 @@ public class CallMonitorService extends Service {
             if (incomingNumber != null && !incomingNumber.isEmpty() && !incomingNumber.equals("Unknown")) {
                 pendingNumber = incomingNumber;
             }
+            
+            // Priority Logic: Always take the larger slot index to handle "Ghost SIM 1" events
+            // If SIM 2 is ringing, and SIM 1 (default) also ghosts ringing, we want to keep SIM 2.
             if (simSlot != -1) {
-                pendingSimSlot = simSlot;
+                if (simSlot > pendingSimSlot) {
+                    pendingSimSlot = simSlot;
+                }
             }
 
             // 2. If we don't have a runnable scheduled, schedule one
             if (sendNotificationRunnable != null) {
+                // If we are already waiting, do not reset the timer just because another SIM event came in
+                // UNLESS we want to extend it? 
+                // Better to let the original timer finish to be responsive, 
+                // as we now have the correct slot in pendingSimSlot.
+                // However, ensuring we don't fire multiple runnables is key.
+                // Current logic removes and reposts, which resets the timer. 
+                // Let's keep resetting to ensure we have the latest stable state after 1000ms.
                 debounceHandler.removeCallbacks(sendNotificationRunnable);
             }
 
@@ -268,12 +280,16 @@ public class CallMonitorService extends Service {
             
             isRinging = false;
         } else if (state == TelephonyManager.CALL_STATE_IDLE) {
-            isRinging = false;
-            // Reset pending data
-            pendingNumber = null;
-            pendingSimSlot = -1;
-            if (sendNotificationRunnable != null) {
-                debounceHandler.removeCallbacks(sendNotificationRunnable);
+            // Only reset if the IDLE comes from the pending slot, or if it's a global IDLE (-1)
+            // This prevents SIM 1 (Ghost) sending IDLE and cancelling SIM 2's valid Ringing state.
+            if (simSlot == -1 || simSlot == pendingSimSlot) {
+                isRinging = false;
+                // Reset pending data
+                pendingNumber = null;
+                pendingSimSlot = -1;
+                if (sendNotificationRunnable != null) {
+                    debounceHandler.removeCallbacks(sendNotificationRunnable);
+                }
             }
         }
     }
@@ -344,12 +360,21 @@ public class CallMonitorService extends Service {
         if (subs == null || subs.isEmpty()) return -1;
 
         // Strategy 1: Check which specific Subscription ID is Ringing
+        int bestSlot = -1;
         for (android.telephony.SubscriptionInfo sub : subs) {
             TelephonyManager subTm = telephonyManager.createForSubscriptionId(sub.getSubscriptionId());
             if (subTm.getCallState() == TelephonyManager.CALL_STATE_RINGING) {
-                CustomExceptionHandler.log(this, "Found Ringing SIM via polling: Slot " + (sub.getSimSlotIndex() + 1));
-                return sub.getSimSlotIndex() + 1;
+                int slot = sub.getSimSlotIndex() + 1;
+                CustomExceptionHandler.log(this, "Found Ringing SIM via polling: Slot " + slot);
+                // Priority Logic: Higher slot wins (SIM 2 > SIM 1)
+                if (slot > bestSlot) {
+                    bestSlot = slot;
+                }
             }
+        }
+        
+        if (bestSlot != -1) {
+            return bestSlot;
         }
         
         // Strategy 2: If only 1 SIM is active, assume it's that one
