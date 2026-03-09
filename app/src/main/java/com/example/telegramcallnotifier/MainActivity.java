@@ -59,9 +59,9 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        checkPermissionsAndStartService(); // Try auto-start
+        // Try auto-start if permissions allow, otherwise flow will handle it
+        checkPermissionsAndStartService(); 
         updateUI();
-        checkBatteryOptimization();
 
         // Log start
         CustomExceptionHandler.log(this, "App Started. SDK: " + Build.VERSION.SDK_INT);
@@ -105,7 +105,7 @@ public class MainActivity extends AppCompatActivity {
         new android.os.Handler().postDelayed(this::updateUI, 500);
     }
 
-    private void checkBatteryOptimization() {
+    private void checkBatteryAndStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
             if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
@@ -113,12 +113,15 @@ public class MainActivity extends AppCompatActivity {
                     Intent intent = new Intent();
                     intent.setAction(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
                     intent.setData(Uri.parse("package:" + getPackageName()));
-                    startActivity(intent);
+                    startActivityForResult(intent, 200); // 200 = Battery Request
+                    return;
                 } catch (Exception e) {
                     e.printStackTrace();
+                    // If it fails, just try to start service anyway
                 }
             }
         }
+        startService();
     }
 
     private void checkPermissionsAndStartService() {
@@ -154,7 +157,7 @@ public class MainActivity extends AppCompatActivity {
         if (!listPermissionsNeeded.isEmpty()) {
             ActivityCompat.requestPermissions(this, listPermissionsNeeded.toArray(new String[0]), PERMISSION_REQUEST_CODE);
         } else {
-            startService();
+            checkBatteryAndStart();
         }
     }
 
@@ -185,10 +188,21 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startService();
+                checkBatteryAndStart();
             } else {
                 Toast.makeText(this, "Permissions are required for the app to work", Toast.LENGTH_LONG).show();
             }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 200) {
+            // Check again or just start. 
+            // Even if user denied, we try to start, but it might be killed later.
+            // Best to just proceed so the app works as much as it can.
+            startService();
         }
     }
 }
