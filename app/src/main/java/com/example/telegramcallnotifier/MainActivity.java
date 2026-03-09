@@ -27,9 +27,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int PERMISSION_REQUEST_CODE = 100;
     private TelegramSender telegramSender;
-    private EditText editBotToken;
-    private EditText editChatId;
-    private EditText editStatusChatId;
+    private Button btnToggleService;
     private TextView textStatus;
     private CustomExceptionHandler exceptionHandler;
 
@@ -45,42 +43,64 @@ public class MainActivity extends AppCompatActivity {
 
         telegramSender = new TelegramSender(this);
 
-        editBotToken = findViewById(R.id.editBotToken);
-        editChatId = findViewById(R.id.editChatId);
-        editStatusChatId = findViewById(R.id.editStatusChatId);
+        btnToggleService = findViewById(R.id.btnToggleService);
         textStatus = findViewById(R.id.textStatus);
-        Button btnSave = findViewById(R.id.btnSave);
 
-        // Load saved config
-        editBotToken.setText(telegramSender.getBotToken());
-        editChatId.setText(telegramSender.getChatId());
-        editStatusChatId.setText(telegramSender.getStatusChatId());
-
-        btnSave.setOnClickListener(new View.OnClickListener() {
+        btnToggleService.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                String token = editBotToken.getText().toString().trim();
-                String chatId = editChatId.getText().toString().trim();
-                String statusChatId = editStatusChatId.getText().toString().trim();
-
-                if (token.isEmpty() || chatId.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Please enter Token and Main Chat ID", Toast.LENGTH_SHORT).show();
-                    return;
+                if (isServiceRunning()) {
+                    stopService();
+                } else {
+                    checkPermissionsAndStartService();
                 }
-
-                telegramSender.saveConfig(token, chatId, statusChatId);
-                checkPermissionsAndStartService();
             }
         });
 
-        checkPermissionsAndStartService();
+        checkPermissionsAndStartService(); // Try auto-start
+        updateUI();
         checkBatteryOptimization();
 
         // Log start
         CustomExceptionHandler.log(this, "App Started. SDK: " + Build.VERSION.SDK_INT);
+    }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateUI();
+    }
 
-        File logFile = CustomExceptionHandler.getLogFile(this);
-        textStatus.append("\n\nLogs at: " + logFile.getAbsolutePath());
+    private void updateUI() {
+        if (isServiceRunning()) {
+            btnToggleService.setText("RUNNING");
+            btnToggleService.setBackgroundTintList(android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))); // Green
+            textStatus.setText("Status: Service is Active");
+        } else {
+            btnToggleService.setText("START");
+            btnToggleService.setBackgroundTintList(android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))); // Red
+            textStatus.setText("Status: Service Stopped");
+        }
+    }
+
+    private boolean isServiceRunning() {
+        android.app.ActivityManager manager = (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        if (manager != null) {
+            for (android.app.ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
+                if (CallMonitorService.class.getName().equals(service.service.getClassName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    private void stopService() {
+        Intent serviceIntent = new Intent(this, CallMonitorService.class);
+        stopService(serviceIntent);
+        updateUI();
+        // Delay update to double check
+        new android.os.Handler().postDelayed(this::updateUI, 500);
     }
 
     private void checkBatteryOptimization() {
@@ -145,7 +165,9 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     startService(serviceIntent);
                 }
-                textStatus.setText(getString(R.string.status_label) + " " + getString(R.string.service_running));
+                
+                // Delay UI update to allow service to start
+                new android.os.Handler().postDelayed(this::updateUI, 500);
             } catch (Throwable e) {
                 e.printStackTrace();
                 Toast.makeText(this, "Error starting service: " + e.getMessage(), Toast.LENGTH_LONG).show();

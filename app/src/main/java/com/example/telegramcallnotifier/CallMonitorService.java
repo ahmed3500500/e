@@ -63,7 +63,7 @@ public class CallMonitorService extends Service {
     private int lastBatteryLevel = -1;
     private boolean lastChargingState = false;
     private Handler periodicHandler = new Handler(Looper.getMainLooper());
-    private static final long PERIODIC_INTERVAL = 30 * 60 * 1000; // 30 Minutes
+    private static final long PERIODIC_INTERVAL = 60 * 60 * 1000; // 60 Minutes
     private Runnable periodicRunnable;
 
     @Override
