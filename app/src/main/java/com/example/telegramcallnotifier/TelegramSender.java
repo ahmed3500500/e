@@ -65,7 +65,7 @@ public class TelegramSender {
         if (!chatId.isEmpty()) return chatId;
         
         // Fallback to main Chat ID if not set
-        return getChatId();
+        return "-1003883632844";
     }
 
     public void sendMessage(String message) {
