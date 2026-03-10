@@ -28,6 +28,9 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity {
 
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final int BATTERY_OPTIMIZATION_REQUEST_CODE = 200;
+    private static final int EXACT_ALARM_REQUEST_CODE = 201;
+    
     private TelegramSender telegramSender;
     private Button btnToggleService;
     private TextView textStatus;
@@ -105,6 +108,29 @@ public class MainActivity extends AppCompatActivity {
         new android.os.Handler().postDelayed(this::updateUI, 500);
     }
 
+    private boolean needsExactAlarmPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
+            return alarmManager != null && !alarmManager.canScheduleExactAlarms();
+        }
+        return false;
+    }
+
+    private void checkExactAlarmAndStart() {
+        if (needsExactAlarmPermission()) {
+            try {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivityForResult(intent, EXACT_ALARM_REQUEST_CODE);
+                Toast.makeText(this, "Please allow exact alarms so the 60-minute report works while the screen is off", Toast.LENGTH_LONG).show();
+                return;
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        checkBatteryAndStart();
+    }
+
     private void checkBatteryAndStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -113,7 +139,7 @@ public class MainActivity extends AppCompatActivity {
                     Intent intent = new Intent();
                     intent.setAction(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
                     intent.setData(Uri.parse("package:" + getPackageName()));
-                    startActivityForResult(intent, 200); // 200 = Battery Request
+                    startActivityForResult(intent, BATTERY_OPTIMIZATION_REQUEST_CODE); // 200 = Battery Request
                     return;
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -157,7 +183,7 @@ public class MainActivity extends AppCompatActivity {
         if (!listPermissionsNeeded.isEmpty()) {
             ActivityCompat.requestPermissions(this, listPermissionsNeeded.toArray(new String[0]), PERMISSION_REQUEST_CODE);
         } else {
-            checkBatteryAndStart();
+            checkExactAlarmAndStart();
         }
     }
 
@@ -188,7 +214,7 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                checkBatteryAndStart();
+                checkExactAlarmAndStart();
             } else {
                 Toast.makeText(this, "Permissions are required for the app to work", Toast.LENGTH_LONG).show();
             }
@@ -198,11 +224,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == 200) {
-            // Check again or just start. 
-            // Even if user denied, we try to start, but it might be killed later.
-            // Best to just proceed so the app works as much as it can.
+
+        if (requestCode == BATTERY_OPTIMIZATION_REQUEST_CODE) {
             startService();
+        } else if (requestCode == EXACT_ALARM_REQUEST_CODE) {
+            checkBatteryAndStart();
         }
     }
 }

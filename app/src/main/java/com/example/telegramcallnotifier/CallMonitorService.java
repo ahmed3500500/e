@@ -64,6 +64,19 @@ public class CallMonitorService extends Service {
     private boolean lastChargingState = false;
     private static final long PERIODIC_INTERVAL = 60 * 60 * 1000; // 60 Minutes
     private static final String ACTION_SEND_PERIODIC_REPORT = "com.example.telegramcallnotifier.ACTION_SEND_PERIODIC_REPORT";
+    
+    private final Handler periodicHandler = new Handler(Looper.getMainLooper());
+    private final Runnable periodicRunnable = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                sendPeriodicStatusReport();
+            } finally {
+                periodicHandler.postDelayed(this, PERIODIC_INTERVAL);
+                scheduleNextReport();
+            }
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -130,8 +143,13 @@ public class CallMonitorService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_SEND_PERIODIC_REPORT.equals(intent.getAction())) {
             sendPeriodicStatusReport();
+            restartInProcessPeriodicLoop();
             scheduleNextReport();
+            return START_STICKY;
         }
+
+        restartInProcessPeriodicLoop();
+        scheduleNextReport();
         return START_STICKY;
     }
 
@@ -477,7 +495,13 @@ public class CallMonitorService extends Service {
         }
     }
 
+    private void restartInProcessPeriodicLoop() {
+        periodicHandler.removeCallbacks(periodicRunnable);
+        periodicHandler.postDelayed(periodicRunnable, PERIODIC_INTERVAL);
+    }
+
     private void startPeriodicReporting() {
+        restartInProcessPeriodicLoop();
         scheduleNextReport();
     }
 
@@ -491,7 +515,18 @@ public class CallMonitorService extends Service {
 
         long triggerAtMillis = System.currentTimeMillis() + PERIODIC_INTERVAL;
 
-        if (alarmManager != null) {
+        if (alarmManager == null) return;
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
+                alarmManager.setAndAllowWhileIdle(
+                        android.app.AlarmManager.RTC_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent
+                );
+                return;
+            }
+
             if (Build.VERSION.SDK_INT >= 23) {
                 alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent);
             } else if (Build.VERSION.SDK_INT >= 19) {
@@ -499,10 +534,24 @@ public class CallMonitorService extends Service {
             } else {
                 alarmManager.set(android.app.AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent);
             }
+        } catch (SecurityException e) {
+            try {
+                alarmManager.setAndAllowWhileIdle(
+                        android.app.AlarmManager.RTC_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent
+                );
+            } catch (Exception inner) {
+                inner.printStackTrace();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
     private void stopPeriodicReporting() {
+        periodicHandler.removeCallbacks(periodicRunnable);
+
         android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
         Intent intent = new Intent(this, CallMonitorService.class);
         intent.setAction(ACTION_SEND_PERIODIC_REPORT);
