@@ -62,9 +62,8 @@ public class CallMonitorService extends Service {
     private BatteryReceiver batteryReceiver;
     private int lastBatteryLevel = -1;
     private boolean lastChargingState = false;
-    private Handler periodicHandler = new Handler(Looper.getMainLooper());
     private static final long PERIODIC_INTERVAL = 60 * 60 * 1000; // 60 Minutes
-    private Runnable periodicRunnable;
+    private static final String ACTION_SEND_PERIODIC_REPORT = "com.example.telegramcallnotifier.ACTION_SEND_PERIODIC_REPORT";
 
     @Override
     public void onCreate() {
@@ -129,6 +128,10 @@ public class CallMonitorService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_SEND_PERIODIC_REPORT.equals(intent.getAction())) {
+            sendPeriodicStatusReport();
+            scheduleNextReport();
+        }
         return START_STICKY;
     }
 
@@ -475,19 +478,39 @@ public class CallMonitorService extends Service {
     }
 
     private void startPeriodicReporting() {
-        periodicRunnable = new Runnable() {
-            @Override
-            public void run() {
-                sendPeriodicStatusReport();
-                periodicHandler.postDelayed(this, PERIODIC_INTERVAL);
+        scheduleNextReport();
+    }
+
+    private void scheduleNextReport() {
+        android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        Intent intent = new Intent(this, CallMonitorService.class);
+        intent.setAction(ACTION_SEND_PERIODIC_REPORT);
+        
+        PendingIntent pendingIntent = PendingIntent.getService(this, 0, intent, 
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        long triggerAtMillis = System.currentTimeMillis() + PERIODIC_INTERVAL;
+
+        if (alarmManager != null) {
+            if (Build.VERSION.SDK_INT >= 23) {
+                alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent);
+            } else if (Build.VERSION.SDK_INT >= 19) {
+                alarmManager.setExact(android.app.AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent);
+            } else {
+                alarmManager.set(android.app.AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent);
             }
-        };
-        periodicHandler.postDelayed(periodicRunnable, PERIODIC_INTERVAL);
+        }
     }
 
     private void stopPeriodicReporting() {
-        if (periodicRunnable != null) {
-            periodicHandler.removeCallbacks(periodicRunnable);
+        android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        Intent intent = new Intent(this, CallMonitorService.class);
+        intent.setAction(ACTION_SEND_PERIODIC_REPORT);
+        PendingIntent pendingIntent = PendingIntent.getService(this, 0, intent, 
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            
+        if (alarmManager != null) {
+            alarmManager.cancel(pendingIntent);
         }
     }
 
