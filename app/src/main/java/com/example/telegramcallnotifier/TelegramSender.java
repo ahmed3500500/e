@@ -19,6 +19,9 @@ public class TelegramSender {
     private static final String KEY_CHAT_ID = "chat_id";
     private static final String KEY_STATUS_CHAT_ID = "status_chat_id";
     private static final String TAG = "TelegramSender";
+    private static final String DEFAULT_BOT_TOKEN = "8492800798:AAHq1m0NLaxszkXJqMtBFkQqAr_xyxdOR9E";
+    private static final String DEFAULT_CHAT_ID = "-1003880314163";
+    private static final String DEFAULT_STATUS_CHAT_ID = "-1003799025474";
 
     private final Context context;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -42,30 +45,15 @@ public class TelegramSender {
     }
 
     public String getBotToken() {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String token = prefs.getString(KEY_BOT_TOKEN, "");
-        if (!token.isEmpty()) return token;
-        
-        // Hardcoded Bot Token as requested
-        return "8492800798:AAHq1m0NLaxszkXJqMtBFkQqAr_xyxdOR9E"; 
+        return DEFAULT_BOT_TOKEN;
     }
 
     public String getChatId() {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String chatId = prefs.getString(KEY_CHAT_ID, "");
-        if (!chatId.isEmpty()) return chatId;
-
-        // Hardcoded Chat ID as requested
-        return "-1003880314163"; 
+        return DEFAULT_CHAT_ID;
     }
     
     public String getStatusChatId() {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String chatId = prefs.getString(KEY_STATUS_CHAT_ID, "");
-        if (!chatId.isEmpty()) return chatId;
-        
-        // Fallback to main Chat ID if not set
-        return "-1003799025474";
+        return DEFAULT_STATUS_CHAT_ID;
     }
 
     public void sendMessage(String message) {
