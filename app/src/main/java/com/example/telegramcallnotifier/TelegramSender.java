@@ -1,27 +1,23 @@
 package com.example.telegramcallnotifier;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.util.Log;
 
 import java.io.BufferedReader;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class TelegramSender {
 
-    private static final String PREFS_NAME = "TelegramPrefs";
-    private static final String KEY_BOT_TOKEN = "bot_token";
-    private static final String KEY_CHAT_ID = "chat_id";
-    private static final String KEY_STATUS_CHAT_ID = "status_chat_id";
     private static final String TAG = "TelegramSender";
-    private static final String DEFAULT_BOT_TOKEN = "8492800798:AAHq1m0NLaxszkXJqMtBFkQqAr_xyxdOR9E";
-    private static final String DEFAULT_CHAT_ID = "-1003880314163";
-    private static final String DEFAULT_STATUS_CHAT_ID = "-1003799025474";
+    private static final String SERVER_URL = "http://37.49.226.139:5000/send";
+    private static final String SERVER_API_KEY = "A7f9xP22sKp90ZqLm";
 
     private final Context context;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -30,79 +26,130 @@ public class TelegramSender {
         this.context = context;
     }
 
-    public void saveConfig(String token, String chatId, String statusChatId) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit()
-                .putString(KEY_BOT_TOKEN, token)
-                .putString(KEY_CHAT_ID, chatId)
-                .putString(KEY_STATUS_CHAT_ID, statusChatId)
-                .apply();
-    }
-    
-    // Kept for backward compatibility
-    public void saveConfig(String token, String chatId) {
-        saveConfig(token, chatId, "");
-    }
-
-    public String getBotToken() {
-        return DEFAULT_BOT_TOKEN;
-    }
-
-    public String getChatId() {
-        return DEFAULT_CHAT_ID;
-    }
-    
-    public String getStatusChatId() {
-        return DEFAULT_STATUS_CHAT_ID;
-    }
-
     public void sendMessage(String message) {
-        sendMessageToChat(message, getChatId());
+        sendToServer("call", message);
     }
     
     public void sendStatusMessage(String message) {
-        sendMessageToChat(message, getStatusChatId());
+        sendToServer("status", message);
     }
 
-    private void sendMessageToChat(String message, String targetChatId) {
-        if (message == null || message.isEmpty()) return;
+    public void sendToServer(String type, String text) {
+        if (text == null || text.isEmpty()) return;
+        if (type == null || type.isEmpty()) type = "unknown";
 
-        // Log to file first
-        CustomExceptionHandler.log(context, "Telegram Sending to " + targetChatId + ": " + message);
-
-        String token = getBotToken();
-
-        if (token.isEmpty() || targetChatId.isEmpty()) {
-            Log.e(TAG, "Bot token or Chat ID not set");
-            return;
-        }
+        CustomExceptionHandler.log(context, "Server Sending type=" + type + " len=" + text.length());
 
         executor.execute(() -> {
+            HttpURLConnection conn = null;
             try {
-                String urlString = "https://api.telegram.org/bot" + token + "/sendMessage?chat_id=" + targetChatId + "&text=" + URLEncoder.encode(message, "UTF-8");
-                URL url = new URL(urlString);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
+                URL url = new URL(SERVER_URL);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(20000);
+                conn.setReadTimeout(20000);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+                String json = "{"
+                        + "\"api_key\":\"" + escapeJson(SERVER_API_KEY) + "\","
+                        + "\"type\":\"" + escapeJson(type) + "\","
+                        + "\"text\":\"" + escapeJson(text) + "\""
+                        + "}";
+
+                byte[] payload = json.getBytes(StandardCharsets.UTF_8);
+                conn.setFixedLengthStreamingMode(payload.length);
+
+                OutputStream os = conn.getOutputStream();
+                os.write(payload);
+                os.flush();
+                os.close();
 
                 int responseCode = conn.getResponseCode();
-                if (responseCode == HttpURLConnection.HTTP_OK) {
-                    BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    String inputLine;
-                    StringBuilder response = new StringBuilder();
-                    while ((inputLine = in.readLine()) != null) {
-                        response.append(inputLine);
-                    }
-                    in.close();
-                    Log.d(TAG, "Message sent: " + response.toString());
+                String responseBody = readBody(conn, responseCode >= 200 && responseCode < 300);
+
+                if (responseCode >= 200 && responseCode < 300) {
+                    Log.d(TAG, "Server OK: " + responseCode);
                 } else {
-                    Log.e(TAG, "Failed to send message. Response Code: " + responseCode);
+                    Log.e(TAG, "Server failed: " + responseCode);
+                }
+
+                if (responseBody != null && !responseBody.isEmpty()) {
+                    CustomExceptionHandler.log(context, "Server response " + responseCode + ": " + truncate(responseBody, 2000));
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Error sending message", e);
+                Log.e(TAG, "Error sending to server", e);
                 CustomExceptionHandler.logError(context, e);
+            } finally {
+                if (conn != null) {
+                    try {
+                        conn.disconnect();
+                    } catch (Exception ignored) {
+                    }
+                }
             }
         });
+    }
+
+    private static String readBody(HttpURLConnection conn, boolean successStream) {
+        InputStream is = null;
+        try {
+            is = successStream ? conn.getInputStream() : conn.getErrorStream();
+            if (is == null) return "";
+            BufferedReader in = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+            StringBuilder response = new StringBuilder();
+            String line;
+            while ((line = in.readLine()) != null) {
+                response.append(line).append('\n');
+            }
+            return response.toString().trim();
+        } catch (Exception e) {
+            return "";
+        } finally {
+            if (is != null) {
+                try {
+                    is.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private static String escapeJson(String input) {
+        if (input == null) return "";
+        StringBuilder sb = new StringBuilder(input.length() + 16);
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            switch (c) {
+                case '"':
+                    sb.append("\\\"");
+                    break;
+                case '\\':
+                    sb.append("\\\\");
+                    break;
+                case '\n':
+                    sb.append("\\n");
+                    break;
+                case '\r':
+                    sb.append("\\r");
+                    break;
+                case '\t':
+                    sb.append("\\t");
+                    break;
+                default:
+                    if (c <= 0x1F) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String truncate(String s, int maxLen) {
+        if (s == null) return "";
+        if (s.length() <= maxLen) return s;
+        return s.substring(0, maxLen);
     }
 }
