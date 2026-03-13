@@ -135,6 +135,7 @@ public class CallMonitorService extends Service {
         // Removed Heartbeat and Start Notification per user request
 
         // Initialize Battery & Status Monitoring
+        telegramSender.sendStatusMessage("Service started");
         startBatteryMonitoring();
         startPeriodicReporting();
     }

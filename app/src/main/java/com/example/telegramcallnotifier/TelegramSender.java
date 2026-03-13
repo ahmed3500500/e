@@ -31,7 +31,7 @@ public class TelegramSender {
     }
     
     public void sendStatusMessage(String message) {
-        sendToServer("status", message);
+        sendToServer("report", message);
     }
 
     public void sendToServer(String type, String text) {
