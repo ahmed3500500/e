@@ -188,24 +188,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startService() {
-        if (!telegramSender.getBotToken().isEmpty()) {
-            Intent serviceIntent = new Intent(this, CallMonitorService.class);
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(serviceIntent);
-                } else {
-                    startService(serviceIntent);
-                }
-                
-                // Delay UI update to allow service to start
-                new android.os.Handler().postDelayed(this::updateUI, 500);
-            } catch (Throwable e) {
-                e.printStackTrace();
-                Toast.makeText(this, "Error starting service: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                textStatus.setText("Error: " + e.getMessage());
+        Intent serviceIntent = new Intent(this, CallMonitorService.class);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
             }
-        } else {
-            textStatus.setText(getString(R.string.status_label) + " " + getString(R.string.service_stopped));
+
+            new android.os.Handler().postDelayed(this::updateUI, 500);
+        } catch (Throwable e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Error starting service: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            textStatus.setText("Error: " + e.getMessage());
         }
     }
 

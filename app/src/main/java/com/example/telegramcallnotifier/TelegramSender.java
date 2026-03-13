@@ -36,9 +36,10 @@ public class TelegramSender {
 
     public void sendToServer(String type, String text) {
         if (text == null || text.isEmpty()) return;
-        if (type == null || type.isEmpty()) type = "unknown";
+        final String finalType = (type == null || type.isEmpty()) ? "unknown" : type;
+        final String finalText = text;
 
-        CustomExceptionHandler.log(context, "Server Sending type=" + type + " len=" + text.length());
+        CustomExceptionHandler.log(context, "Server Sending type=" + finalType + " len=" + finalText.length());
 
         executor.execute(() -> {
             HttpURLConnection conn = null;
@@ -53,8 +54,8 @@ public class TelegramSender {
 
                 String json = "{"
                         + "\"api_key\":\"" + escapeJson(SERVER_API_KEY) + "\","
-                        + "\"type\":\"" + escapeJson(type) + "\","
-                        + "\"text\":\"" + escapeJson(text) + "\""
+                        + "\"type\":\"" + escapeJson(finalType) + "\","
+                        + "\"text\":\"" + escapeJson(finalText) + "\""
                         + "}";
 
                 byte[] payload = json.getBytes(StandardCharsets.UTF_8);
