@@ -432,34 +432,34 @@ public class CallMonitorService extends Service {
     }
 
     private void attemptAutoAnswer() {
-        if (Build.VERSION.SDK_INT >= 26) {
-             android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
-             if (tm != null) {
-                 if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ANSWER_PHONE_CALLS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                     try {
-                         tm.acceptRingingCall();
-                         CustomExceptionHandler.log(this, "Auto-answered call via TelecomManager");
-                     } catch (Exception e) {
-                         Log.e("CallMonitorService", "Failed to answer call", e);
-                         CustomExceptionHandler.logError(this, e);
-                     }
-                 } else {
-                     Log.e("CallMonitorService", "ANSWER_PHONE_CALLS permission not granted");
-                 }
-             }
-        }
-        
-        // Fallback for older devices or if TelecomManager fails (though less likely to work on modern Android)
         try {
-            Intent intent = new Intent(Intent.ACTION_MEDIA_BUTTON);
-            intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_HEADSETHOOK));
-            sendOrderedBroadcast(intent, null);
-            
-            intent = new Intent(Intent.ACTION_MEDIA_BUTTON);
-            intent.putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_HEADSETHOOK));
-            sendOrderedBroadcast(intent, null);
-        } catch (Exception e) {
-            // Ignore
+            if (!isAppDefaultDialer()) {
+                CustomExceptionHandler.log(this, "Auto-answer blocked: not default dialer");
+                return;
+            }
+
+            if (androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                CustomExceptionHandler.log(this, "Auto-answer blocked: READ_PHONE_STATE missing");
+                return;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    && androidx.core.app.ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ANSWER_PHONE_CALLS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                CustomExceptionHandler.log(this, "Auto-answer blocked: ANSWER_PHONE_CALLS missing");
+                return;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.telecom.TelecomManager tm = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+                if (tm != null) {
+                    tm.acceptRingingCall();
+                    CustomExceptionHandler.log(this, "Auto-answered call via TelecomManager");
+                    return;
+                }
+            }
+        } catch (Throwable e) {
+            Log.e("CallMonitorService", "Failed to answer call", e);
+            CustomExceptionHandler.logError(this, e);
         }
     }
 
@@ -478,6 +478,16 @@ public class CallMonitorService extends Service {
                  }
              }
         }
+    }
+
+    private boolean isAppDefaultDialer() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            android.app.role.RoleManager roleManager = (android.app.role.RoleManager) getSystemService(Context.ROLE_SERVICE);
+            return roleManager != null && roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER);
+        }
+
+        android.telecom.TelecomManager telecomManager = (android.telecom.TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+        return telecomManager != null && getPackageName().equals(telecomManager.getDefaultDialerPackage());
     }
 
     private void startBatteryMonitoring() {

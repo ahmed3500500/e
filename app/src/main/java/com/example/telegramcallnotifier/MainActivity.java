@@ -16,6 +16,9 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import android.app.role.RoleManager;
+import android.telecom.TelecomManager;
+
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -30,6 +33,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int BATTERY_OPTIMIZATION_REQUEST_CODE = 200;
     private static final int EXACT_ALARM_REQUEST_CODE = 201;
+    private static final int REQ_DIALER_ROLE = 3001;
+    private static final int REQ_CHANGE_DEFAULT_DIALER = 3002;
     
     private TelegramSender telegramSender;
     private Button btnToggleService;
@@ -77,15 +82,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateUI() {
+        String readiness = buildReadinessText();
+
         if (isServiceRunning()) {
             btnToggleService.setText("RUNNING");
             btnToggleService.setBackgroundTintList(android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))); // Green
-            textStatus.setText("Status: Service is Active");
+            textStatus.setText("Status: Service is Active\n\n" + readiness);
         } else {
             btnToggleService.setText("START");
             btnToggleService.setBackgroundTintList(android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#F44336"))); // Red
-            textStatus.setText("Status: Service Stopped");
+            textStatus.setText("Status: Service Stopped\n\n" + readiness);
         }
+
+        btnToggleService.setEnabled(isServiceRunning() || isReadyForAutoAnswer());
     }
 
     private boolean isServiceRunning() {
@@ -183,11 +192,58 @@ public class MainActivity extends AppCompatActivity {
         if (!listPermissionsNeeded.isEmpty()) {
             ActivityCompat.requestPermissions(this, listPermissionsNeeded.toArray(new String[0]), PERMISSION_REQUEST_CODE);
         } else {
-            checkExactAlarmAndStart();
+            checkDefaultDialerAndStart();
         }
     }
 
+    private boolean isAppDefaultDialer() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            RoleManager roleManager = (RoleManager) getSystemService(Context.ROLE_SERVICE);
+            return roleManager != null && roleManager.isRoleHeld(RoleManager.ROLE_DIALER);
+        }
+
+        TelecomManager telecomManager = (TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+        return telecomManager != null && getPackageName().equals(telecomManager.getDefaultDialerPackage());
+    }
+
+    private void requestDefaultDialer() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            RoleManager roleManager = (RoleManager) getSystemService(Context.ROLE_SERVICE);
+            if (roleManager != null
+                    && roleManager.isRoleAvailable(RoleManager.ROLE_DIALER)
+                    && !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
+                Intent intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER);
+                startActivityForResult(intent, REQ_DIALER_ROLE);
+            }
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            TelecomManager telecomManager = (TelecomManager) getSystemService(Context.TELECOM_SERVICE);
+            if (telecomManager != null && !getPackageName().equals(telecomManager.getDefaultDialerPackage())) {
+                Intent intent = new Intent(TelecomManager.ACTION_CHANGE_DEFAULT_DIALER);
+                intent.putExtra(TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, getPackageName());
+                startActivityForResult(intent, REQ_CHANGE_DEFAULT_DIALER);
+            }
+        }
+    }
+
+    private void checkDefaultDialerAndStart() {
+        if (!isAppDefaultDialer()) {
+            Toast.makeText(this, "لازم تخلي التطبيق Default Phone App عشان الرد التلقائي يشتغل", Toast.LENGTH_LONG).show();
+            requestDefaultDialer();
+            updateUI();
+            return;
+        }
+        checkExactAlarmAndStart();
+    }
+
     private void startService() {
+        if (!isAppDefaultDialer()) {
+            checkDefaultDialerAndStart();
+            return;
+        }
+
         Intent serviceIntent = new Intent(this, CallMonitorService.class);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -209,7 +265,7 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                checkExactAlarmAndStart();
+                checkDefaultDialerAndStart();
             } else {
                 Toast.makeText(this, "Permissions are required for the app to work", Toast.LENGTH_LONG).show();
             }
@@ -224,6 +280,53 @@ public class MainActivity extends AppCompatActivity {
             startService();
         } else if (requestCode == EXACT_ALARM_REQUEST_CODE) {
             checkBatteryAndStart();
+        } else if (requestCode == REQ_DIALER_ROLE || requestCode == REQ_CHANGE_DEFAULT_DIALER) {
+            if (isAppDefaultDialer()) {
+                checkExactAlarmAndStart();
+            } else {
+                Toast.makeText(this, "التطبيق لسه مش Default Dialer", Toast.LENGTH_LONG).show();
+                updateUI();
+            }
         }
+    }
+
+    private boolean isReadyForAutoAnswer() {
+        boolean hasReadPhone = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
+                == PackageManager.PERMISSION_GRANTED;
+
+        boolean hasAnswer = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED;
+
+        boolean isDialer = isAppDefaultDialer();
+
+        boolean ignoreBattery = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            ignoreBattery = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+        }
+
+        return hasReadPhone && hasAnswer && isDialer && ignoreBattery;
+    }
+
+    private String buildReadinessText() {
+        boolean hasReadPhone = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
+                == PackageManager.PERMISSION_GRANTED;
+
+        boolean hasAnswer = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED;
+
+        boolean isDialer = isAppDefaultDialer();
+
+        boolean ignoreBattery = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            ignoreBattery = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+        }
+
+        return "Ready Check:\n"
+                + "- READ_PHONE_STATE: " + (hasReadPhone ? "OK" : "MISSING") + "\n"
+                + "- ANSWER_PHONE_CALLS: " + (hasAnswer ? "OK" : "MISSING") + "\n"
+                + "- Default Dialer: " + (isDialer ? "YES" : "NO") + "\n"
+                + "- Battery Ignored: " + (ignoreBattery ? "YES" : "NO");
     }
 }
